@@ -8,17 +8,23 @@
 #include <fstream>
 
 
-const int POP_SIZE = 16;         // Number of "drones" to test per generation
+const int POP_SIZE = 64;         // Number of "drones" to test per generation
 const float SIGMA = 0.15f;        // Noise standard deviation
 const float ALPHA = 0.01f;       // Learning rate
-const float EPISODE_TIME = 3.0f; // Seconds per flight
-const int INPUT_SIZE = 3;        
+const float EPISODE_TIME = 6.0f; // Seconds per flight
+const int INPUT_SIZE = 6;        // Dx, Dy, Dz, Vel X, Vel Y, Vel Z
 const int HIDDEN_SIZE = 64;      // Neurons in hidden layer
 const int OUTPUT_SIZE = 4;       // Linear X, Linear Y, Linear Z, Angular Z
 
 const float START_X = 0.0f;
 const float START_Y = 0.0f;
 const float START_Z = 0.5f;
+
+const float MAX_LIN_VEL_XY = 2.0f;  // Max horizontal speed (m/s)
+const float MAX_LIN_VEL_Z  = 1.0f;  // Max vertical speed (m/s)
+const float MAX_ANG_VEL_Z  = 1.5f;  // Max rotational speed (rad/s)
+const float MAX_DIST_RANGE = 15.0f; // Inputs beyond are clamped to 1.0
+const float MAX_VEL_RANGE  = 2.5f;  // Inputs beyond are clamped to 1.0
 
 inline float tanh_activation(float x) { return std::tanh(x); }
 

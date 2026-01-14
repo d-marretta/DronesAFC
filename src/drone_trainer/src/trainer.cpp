@@ -17,7 +17,7 @@ DroneTrainer::DroneTrainer() : Node("drone_trainer"), gen_(0), pop_idx_(0) {
         [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
             pos_x = msg->pose.pose.position.x;
             pos_y = msg->pose.pose.position.y;
-            pos_z = msg->pose.pose.position.z;
+            pos_z = msg->pose.pose.position.z;  
 
             tf2::Quaternion q(
                 msg->pose.pose.orientation.x,
@@ -29,6 +29,11 @@ DroneTrainer::DroneTrainer() : Node("drone_trainer"), gen_(0), pop_idx_(0) {
             double roll, pitch, yaw;
             m.getRPY(roll, pitch, yaw);
             current_yaw = (float)yaw;
+
+            vel_x = msg->twist.twist.linear.x;
+            vel_y = msg->twist.twist.linear.y;
+            vel_z = msg->twist.twist.linear.z;
+
             has_odom = true;
         });
 
@@ -36,18 +41,17 @@ DroneTrainer::DroneTrainer() : Node("drone_trainer"), gen_(0), pop_idx_(0) {
     rng_ = std::mt19937(rd());
     dist_ = std::normal_distribution<float>(0.0, 1.0);
 
-    timer_control_ = this->create_wall_timer(50ms, std::bind(&DroneTrainer::control_loop, this));
-    timer_logic_ = this->create_wall_timer(10ms, std::bind(&DroneTrainer::state_machine_loop, this));
+    timer_main = this->create_wall_timer(20ms, std::bind(&DroneTrainer::action_loop, this));
 
     state_ = STATE_INIT;
     RCLCPP_INFO(this->get_logger(), "Trainer Node Initialized.");
 }
 
-void DroneTrainer::state_machine_loop() {
+void DroneTrainer::action_loop() {
     auto now = this->now();
 
     switch (state_) {
-        case STATE_INIT:
+        case STATE_INIT: {
             if (!client_reset_->service_is_ready()) {
                 RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
                     "Waiting for reset service to be available...");
@@ -65,34 +69,24 @@ void DroneTrainer::state_machine_loop() {
             RCLCPP_INFO(this->get_logger(), "=== GEN %d STARTED ===", gen_);
             state_ = STATE_RESET;
             break;
-
-        case STATE_RESET:
+        }
+        case STATE_RESET: {
             reset_env();
             reset_trigger_time_ = now;
             state_ = STATE_WAIT_RESET;
             break;
-
-        case STATE_WAIT_RESET:
+        }
+        case STATE_WAIT_RESET: {
             if ((now - reset_trigger_time_).seconds() > 2.0) {
                 start_time_ = now;
                 current_episode_reward_ = 0.0f;
                 state_ = STATE_ROLLOUT;
             }
             break;
+        }
+        case STATE_ROLLOUT: {
+            if (!has_odom) return;
 
-        case STATE_ROLLOUT:
-            // If drone flies too far (>20m), kill episode early
-            // if (std::abs(pos_x) > 20.0 || std::abs(pos_y) > 20.0) {
-            //     current_episode_reward_ -= 200.0; // Huge penalty
-            //     RCLCPP_WARN(this->get_logger(), "Member %d WENT OUT OF BOUNDS! Resetting...", pop_idx_+1);
-                
-            //     rewards_.push_back(current_episode_reward_);
-            //     pop_idx_++;
-            //     if (pop_idx_ >= POP_SIZE) state_ = STATE_UPDATE;
-            //     else state_ = STATE_RESET;
-            //     return;
-            // }
-            // Just check if time passed, the actual logic is in control_loop
             if ((now - start_time_).seconds() > EPISODE_TIME) {
                 rewards_.push_back(current_episode_reward_);
                 RCLCPP_INFO(this->get_logger(), 
@@ -103,10 +97,61 @@ void DroneTrainer::state_machine_loop() {
                 pop_idx_++;
                 if (pop_idx_ >= POP_SIZE) state_ = STATE_UPDATE;
                 else state_ = STATE_RESET;
+                return;
             }
-            break;
 
-        case STATE_UPDATE:
+            std_msgs::msg::Bool enable; enable.data = true;
+            pub_enable_->publish(enable);
+
+            float dx_world = goal_x - pos_x;
+            float dy_world = goal_y - pos_y;
+            float dz = goal_z - pos_z;
+            float dist = std::sqrt(dx_world*dx_world + dy_world*dy_world + dz*dz);
+            
+            if (dist < 0.5f && !goal_reached_flag_) {
+                goal_reached_flag_ = true; // Set flag so we only save once per success
+                RCLCPP_INFO(this->get_logger(), "GOAL REACHED (%.2fm) !!! Saving model...", dist);
+                
+                brain_.save("drone_weights.txt"); 
+            }
+
+            // Transform to body frame to be rotation invariant
+            float cos_yaw = std::cos(-current_yaw);
+            float sin_yaw = std::sin(-current_yaw);
+            
+            float dx_body = dx_world * cos_yaw - dy_world * sin_yaw;
+            float dy_body = dx_world * sin_yaw + dy_world * cos_yaw;
+
+            float reward = -dist;
+            if (dist < 2.0) reward += 0.5;
+            if (dist < 1.0) reward += 2.0;
+            
+            current_episode_reward_ += reward * 0.05f;
+            
+            // Inference
+            std::vector<float> inputs = {
+                std::clamp(dx_body / MAX_DIST_RANGE, -1.0f, 1.0f), 
+                std::clamp(dy_body / MAX_DIST_RANGE, -1.0f, 1.0f), 
+                std::clamp(dz / MAX_DIST_RANGE, -1.0f, 1.0f),
+                std::clamp(vel_x / MAX_VEL_RANGE, -1.0f, 1.0f),
+                std::clamp(vel_y / MAX_VEL_RANGE, -1.0f, 1.0f),
+                std::clamp(vel_z / MAX_VEL_RANGE, -1.0f, 1.0f)
+            };
+
+            auto outputs = brain_.forward(inputs, noise_population_[pop_idx_], SIGMA);
+
+            // Output mapping
+            geometry_msgs::msg::Twist cmd;
+            
+            cmd.linear.x = outputs[0] * MAX_LIN_VEL_XY;
+            cmd.linear.y = outputs[1] * MAX_LIN_VEL_XY;
+            cmd.linear.z = outputs[2] * MAX_LIN_VEL_Z;
+            cmd.angular.z = outputs[3] * MAX_ANG_VEL_Z;
+
+            pub_vel_->publish(cmd);
+            break;
+        }
+        case STATE_UPDATE: {
             float mean = 0.0f, std_dev = 0.0f;
             for(float r : rewards_) mean += r;
             mean /= POP_SIZE;
@@ -132,99 +177,10 @@ void DroneTrainer::state_machine_loop() {
             gen_++;
             state_ = STATE_INIT;
             break;
+        }
     }
 }
 
-void DroneTrainer::control_loop() {
-    if (state_ != STATE_ROLLOUT || !has_odom) return;
-        
-    std_msgs::msg::Bool enable; enable.data = true;
-    pub_enable_->publish(enable);
-
-    float dx_world = goal_x - pos_x;
-    float dy_world = goal_y - pos_y;
-    float dz = goal_z - pos_z;
-    float dist = std::sqrt(dx_world*dx_world + dy_world*dy_world + dz*dz);
-    
-    if (dist < 0.5f && !goal_reached_flag_) {
-        goal_reached_flag_ = true; // Set flag so we only save once per success
-        RCLCPP_INFO(this->get_logger(), "GOAL REACHED (%.2fm) !!! Saving model...", dist);
-        
-        brain_.save("drone_weights.txt"); 
-    }
-
-    // Transform to body frame to be rotation invariant
-    float cos_yaw = std::cos(-current_yaw);
-    float sin_yaw = std::sin(-current_yaw);
-    
-    float dx_body = dx_world * cos_yaw - dy_world * sin_yaw;
-    float dy_body = dx_world * sin_yaw + dy_world * cos_yaw;
-
-    float reward = -dist;
-    if (dist < 2.0) reward += 0.5;
-    if (dist < 1.0) reward += 2.0;
-    
-    current_episode_reward_ += reward * 0.05f;
-    
-    // Inference
-    std::vector<float> inputs = {
-        std::clamp(dx_body / 5.0f, -1.0f, 1.0f), 
-        std::clamp(dy_body / 5.0f, -1.0f, 1.0f), 
-        std::clamp(dz / 5.0f, -1.0f, 1.0f),
-        0.0f // Placeholder or future Yaw Target
-    };
-
-    auto outputs = brain_.forward(inputs, noise_population_[pop_idx_], SIGMA);
-
-    // Output mapping
-    geometry_msgs::msg::Twist cmd;
-    
-    // (-1..1) -> (-1.5 m/s .. 1.5 m/s)
-    cmd.linear.x = outputs[0] * 1.5f;
-
-    // (-1..1) -> (-1.5 m/s .. 1.5 m/s)
-    cmd.linear.y = outputs[1] * 1.5f;
-
-    // (-1..1) -> (-1.0 m/s .. 1.0 m/s)
-    cmd.linear.z = outputs[2] * 1.0f;
-
-    // (-1..1) -> (-2.0 rad/s .. 2.0 rad/s)
-    cmd.angular.z = outputs[3] * 2.0f;
-
-    pub_vel_->publish(cmd);
-}
-
-// void DroneTrainer::reset_env() {
-//     goal_reached_flag_ = false;
-//     geometry_msgs::msg::Twist stop;
-//     for(int i=0; i<5; i++) {
-//             pub_vel_->publish(stop);
-//             std::this_thread::sleep_for(10ms);
-//     }
-
-//     // Use directly ign service call to reset pose
-//     std::string cmd = 
-//         "ign service -s /world/quadcopter/set_pose "
-//         "--reqtype ignition.msgs.Pose "
-//         "--reptype ignition.msgs.Boolean "
-//         "--timeout 2000 "
-//         "--req 'name: \\\"escaper\\\", position: {x: " + 
-//         std::to_string(START_X) + ", y: " + 
-//         std::to_string(START_Y) + ", z: " + 
-//         std::to_string(START_Z) + "}, orientation: {w: 1.0}' "
-//         "> /dev/null 2>&1";
-    
-//     std::string full_cmd = "/bin/bash -c \"source /opt/ros/humble/setup.bash && " + cmd + "\"";
-    
-//     // std::cout << "[DEBUG] Executing: " << full_cmd << std::endl;
-
-//     int ret = system(full_cmd.c_str());
-//     (void)ret; 
-
-//     // Re-enable motors
-//     std_msgs::msg::Bool enable; enable.data = true;
-//     pub_enable_->publish(enable);
-// }
 
 void DroneTrainer::reset_env() {
     goal_reached_flag_ = false;

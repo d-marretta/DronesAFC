@@ -21,10 +21,11 @@ private:
     rclcpp::Client<ros_gz_interfaces::srv::SetEntityPose>::SharedPtr client_reset_;    
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_enable_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
-    rclcpp::TimerBase::SharedPtr timer_control_, timer_logic_;
+    rclcpp::TimerBase::SharedPtr timer_main;
 
     float pos_x=0, pos_y=0, pos_z=0;
     float current_yaw = 0.0;
+    float vel_x=0, vel_y=0, vel_z=0;
 
     bool has_odom = false;
     float goal_x=5.0, goal_y=3.0, goal_z=2.0; 
@@ -43,8 +44,7 @@ private:
     std::mt19937 rng_;
     std::normal_distribution<float> dist_;
 
-void state_machine_loop();
-    void control_loop();
+    void action_loop();
     void reset_env();
 };
 
