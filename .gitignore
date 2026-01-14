@@ -1,0 +1,31 @@
+# ROS 2 / Colcon Build Artifacts
+build/
+install/
+log/
+COLCON_IGNORE
+
+# C++ / CMake artifacts (if building manually or outside colcon)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+*.a
+*.o
+*.so
+
+# Python artifacts (if you add Python scripts later)
+__pycache__/
+*.pyc
+
+# VS Code Local Settings
+.vscode/
+*.code-workspace
+
+# OS Generated files
+.DS_Store
+Thumbs.db
+
+# Project Specific Generated Files
+# We ignore this because it changes every time the drone reaches the goal
+drone_weights.txt
