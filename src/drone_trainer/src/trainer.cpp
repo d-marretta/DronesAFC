@@ -156,7 +156,7 @@ void DroneTrainer::action_loop() {
                 brain_.save("drone_weights.txt"); 
             }
             // Crashed
-            else if (pos_z < 0.15f) { 
+            else if (pos_z < 0.1f) { 
                 done = true;
                 crashed = true; 
             }

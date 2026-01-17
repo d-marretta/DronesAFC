@@ -18,7 +18,7 @@ const int OUTPUT_SIZE = 4;       // Linear X, Linear Y, Linear Z, Angular Z
 
 const float START_X = 0.0f;
 const float START_Y = 0.0f;
-const float START_Z = 0.5f;
+const float START_Z = 1.0f;
 
 const float MAX_LIN_VEL_X = 3.0f;  // Max horizontal speed (m/s)
 const float MAX_LIN_VEL_Y = 2.0f;
