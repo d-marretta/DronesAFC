@@ -87,7 +87,31 @@ void DroneTrainer::action_loop() {
             break;
         }
         case STATE_WAIT_RESET: {
-            if ((now - reset_trigger_time_).seconds() > 2.0) {
+            // Keep motors running 
+            geometry_msgs::msg::Twist hover_cmd;
+            hover_cmd.linear.x = 0.0; 
+            hover_cmd.linear.y = 0.0; 
+            hover_cmd.linear.z = 0.0;
+            hover_cmd.angular.z = 0.0;
+            pub_vel_->publish(hover_cmd);
+            
+            float reset_dx = pos_x - START_X;
+            float reset_dy = pos_y - START_Y;
+            float reset_dz = pos_z - START_Z;
+            float dist_from_start = std::sqrt(reset_dx*reset_dx + reset_dy*reset_dy + reset_dz*reset_dz);
+
+            // If we are further than 20cm from the spawn point, the reset hasn't finished yet
+            if (dist_from_start > 0.2f) {
+                reset_trigger_time_ = now; 
+                
+                // RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
+                //    "Waiting for reset... Dist: %.2fm", dist_from_start);
+                return; 
+            }
+            // Wait for a short duration to ensure reset is complete
+            if ((now - reset_trigger_time_).seconds() > 0.5) {
+                if (!has_odom) return;
+
                 start_time_ = now;
                 current_episode_reward_ = 0.0f;
 
@@ -95,7 +119,6 @@ void DroneTrainer::action_loop() {
                 float dy = goal_y - pos_y;
                 float dz = goal_z - pos_z;
                 initial_dist_ = std::sqrt(dx*dx + dy*dy + dz*dz);
-                //RCLCPP_INFO(this->get_logger(), "Initial distance: %.2f", initial_dist_);
 
                 state_ = STATE_ROLLOUT;
             }
