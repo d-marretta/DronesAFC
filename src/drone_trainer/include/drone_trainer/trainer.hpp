@@ -28,7 +28,7 @@ private:
     float vel_x=0, vel_y=0, vel_z=0;
 
     bool has_odom = false;
-    float goal_x=5.0, goal_y=3.0, goal_z=2.0; 
+    float goal_x=10.0, goal_y=4.0, goal_z=3.0; 
 
     MLP brain_;
     std::vector<std::vector<float>> noise_population_;
@@ -38,6 +38,14 @@ private:
     float current_episode_reward_ = 0.0;
     rclcpp::Time start_time_;
     rclcpp::Time reset_trigger_time_;
+
+    float initial_dist_ = 0.0f;
+
+    // Paper constants
+    const float REWARD_C1 = 1000.0f;       // Task reward
+    const float REWARD_C2 = 1000.0f;       // Crash penalty
+    const float PENALTY_W1 = 500.0f;     // Existential penalty weight
+    const float T_MAX_STEPS = 50.0f * EPISODE_TIME; // frequency of control (Hz) * episode time (s)
 
     bool goal_reached_flag_ = false;
     

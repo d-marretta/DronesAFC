@@ -4,9 +4,9 @@
 #include <iostream>
 #include <thread>
 #include <cstdlib>
+#include <chrono>
 
-
-using namespace std::chrono_literals;
+//using namespace std::chrono_literals;
 
 DroneTrainer::DroneTrainer() : Node("drone_trainer"), gen_(0), pop_idx_(0) {
     pub_vel_ = this->create_publisher<geometry_msgs::msg::Twist>("/escaper/cmd_vel", 10);
@@ -41,8 +41,13 @@ DroneTrainer::DroneTrainer() : Node("drone_trainer"), gen_(0), pop_idx_(0) {
     rng_ = std::mt19937(rd());
     dist_ = std::normal_distribution<float>(0.0, 1.0);
 
-    timer_main = this->create_wall_timer(20ms, std::bind(&DroneTrainer::action_loop, this));
-
+    timer_main = rclcpp::create_timer(
+        this->get_node_base_interface(),
+        this->get_node_timers_interface(),
+        this->get_clock(),            
+        std::chrono::milliseconds(20),
+        std::bind(&DroneTrainer::action_loop, this)
+    );
     state_ = STATE_INIT;
     RCLCPP_INFO(this->get_logger(), "Trainer Node Initialized.");
 }
@@ -60,10 +65,15 @@ void DroneTrainer::action_loop() {
             noise_population_.clear();
             rewards_.clear();
             // Generate noise for the entire population
-            for(int i=0; i<POP_SIZE; i++) {
+            for(int i=0; i<POP_SIZE / 2; i++) {
                 std::vector<float> noise(brain_.get_weight_count());
                 for(float &n : noise) n = dist_(rng_);
                 noise_population_.push_back(noise);
+                
+                // Use antithetic sampling
+                std::vector<float> anti_noise = noise;
+                for(float &n : anti_noise) n = -n;
+                noise_population_.push_back(anti_noise);
             }
             pop_idx_ = 0;
             RCLCPP_INFO(this->get_logger(), "=== GEN %d STARTED ===", gen_);
@@ -80,26 +90,19 @@ void DroneTrainer::action_loop() {
             if ((now - reset_trigger_time_).seconds() > 2.0) {
                 start_time_ = now;
                 current_episode_reward_ = 0.0f;
+
+                float dx = goal_x - pos_x;
+                float dy = goal_y - pos_y;
+                float dz = goal_z - pos_z;
+                initial_dist_ = std::sqrt(dx*dx + dy*dy + dz*dz);
+                //RCLCPP_INFO(this->get_logger(), "Initial distance: %.2f", initial_dist_);
+
                 state_ = STATE_ROLLOUT;
             }
             break;
         }
         case STATE_ROLLOUT: {
             if (!has_odom) return;
-
-            if ((now - start_time_).seconds() > EPISODE_TIME) {
-                rewards_.push_back(current_episode_reward_);
-                RCLCPP_INFO(this->get_logger(), 
-                    "Member %d/%d | Reward: %.2f | End Pos: [%.2f, %.2f, %.2f] | Goal: [%.2f, %.2f, %.2f]", 
-                    pop_idx_+1, POP_SIZE, current_episode_reward_, 
-                    pos_x, pos_y, pos_z, 
-                    goal_x, goal_y, goal_z);
-                pop_idx_++;
-                if (pop_idx_ >= POP_SIZE) state_ = STATE_UPDATE;
-                else state_ = STATE_RESET;
-                return;
-            }
-
             std_msgs::msg::Bool enable; enable.data = true;
             pub_enable_->publish(enable);
 
@@ -107,13 +110,60 @@ void DroneTrainer::action_loop() {
             float dy_world = goal_y - pos_y;
             float dz = goal_z - pos_z;
             float dist = std::sqrt(dx_world*dx_world + dy_world*dy_world + dz*dz);
-            
-            if (dist < 0.5f && !goal_reached_flag_) {
-                goal_reached_flag_ = true; // Set flag so we only save once per success
-                RCLCPP_INFO(this->get_logger(), "GOAL REACHED (%.2fm) !!! Saving model...", dist);
-                
+
+            // Existential penalty
+            current_episode_reward_ -= (PENALTY_W1 / T_MAX_STEPS);
+
+            bool done = false;
+            bool crashed = false;
+            // Time expired
+            if ((now - start_time_).seconds() > EPISODE_TIME) {
+                done = true;
+            }
+            // Goal reached
+            else if (dist < 0.5f) {
+                done = true;
+                RCLCPP_INFO(this->get_logger(), "GOAL REACHED!");
                 brain_.save("drone_weights.txt"); 
             }
+            // Crashed
+            else if (pos_z < 0.1f) { 
+                done = true;
+                crashed = true; 
+            }
+
+            if (done) {
+                float terminal_reward = 0.0f;
+
+                if (crashed) {
+                    terminal_reward = -REWARD_C2;
+                } else {
+                    // C1 * (1 - ||p_T|| / ||p_0||) 
+                    float progress_ratio = dist / (initial_dist_ + 1e-5f);
+                    terminal_reward = REWARD_C1 * (1.0f - progress_ratio);
+                }
+
+                // Add terminal reward to the accumulated existential penalty
+                current_episode_reward_ += terminal_reward;
+
+                // Logging and state Transition
+                rewards_.push_back(current_episode_reward_);
+                RCLCPP_INFO(this->get_logger(), 
+                    "Member %d Done. Reward: %.2f (Dist: %.2f -> %.2f) | End Pos: [%.2f, %.2f, %.2f] | Goal: [%.2f, %.2f, %.2f]", 
+                    pop_idx_+1, 
+                    current_episode_reward_, 
+                    initial_dist_, 
+                    dist,
+                    pos_x, pos_y, pos_z,    
+                    goal_x, goal_y, goal_z 
+                );
+                
+                pop_idx_++;
+                if (pop_idx_ >= POP_SIZE) state_ = STATE_UPDATE;
+                else state_ = STATE_RESET;
+                return; // Exit rollout
+            }
+
 
             // Transform to body frame to be rotation invariant
             float cos_yaw = std::cos(-current_yaw);
@@ -121,12 +171,6 @@ void DroneTrainer::action_loop() {
             
             float dx_body = dx_world * cos_yaw - dy_world * sin_yaw;
             float dy_body = dx_world * sin_yaw + dy_world * cos_yaw;
-
-            float reward = -dist;
-            if (dist < 2.0) reward += 0.5;
-            if (dist < 1.0) reward += 2.0;
-            
-            current_episode_reward_ += reward * 0.05f;
             
             // Inference
             std::vector<float> inputs = {
@@ -143,8 +187,8 @@ void DroneTrainer::action_loop() {
             // Output mapping
             geometry_msgs::msg::Twist cmd;
             
-            cmd.linear.x = outputs[0] * MAX_LIN_VEL_XY;
-            cmd.linear.y = outputs[1] * MAX_LIN_VEL_XY;
+            cmd.linear.x = outputs[0] * MAX_LIN_VEL_X;
+            cmd.linear.y = outputs[1] * MAX_LIN_VEL_Y;
             cmd.linear.z = outputs[2] * MAX_LIN_VEL_Z;
             cmd.angular.z = outputs[3] * MAX_ANG_VEL_Z;
 
