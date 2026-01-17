@@ -46,8 +46,6 @@ private:
     const float REWARD_C2 = 1000.0f;       // Crash penalty
     const float PENALTY_W1 = 500.0f;     // Existential penalty weight
     const float T_MAX_STEPS = 50.0f * EPISODE_TIME; // frequency of control (Hz) * episode time (s)
-
-    bool goal_reached_flag_ = false;
     
     std::mt19937 rng_;
     std::normal_distribution<float> dist_;

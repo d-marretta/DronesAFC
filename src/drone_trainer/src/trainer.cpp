@@ -100,12 +100,18 @@ void DroneTrainer::action_loop() {
             float reset_dz = pos_z - START_Z;
             float dist_from_start = std::sqrt(reset_dx*reset_dx + reset_dy*reset_dy + reset_dz*reset_dz);
 
-            // If we are further than 20cm from the spawn point, the reset hasn't finished yet
-            if (dist_from_start > 0.2f) {
-                reset_trigger_time_ = now; 
-                
+            // If we are further than 50cm from the spawn point, the reset hasn't finished yet
+            if (dist_from_start > 0.5f) {
+                if ((now - reset_trigger_time_).seconds() > 1.0) {
+                    RCLCPP_WARN(this->get_logger(), 
+                        "Stuck at %.2fm (Threshold 0.5m). Forcing retry...", dist_from_start);
+                    
+                    reset_env(); 
+                    return; 
+                }
+                        
                 // RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
-                //    "Waiting for reset... Dist: %.2fm", dist_from_start);
+                //    "Waiting for reset... X: %.2f, Y: %.2f, Z: %.2f, Dist: %.2fm", pos_x, pos_y, pos_z, dist_from_start);
                 return; 
             }
             // Wait for a short duration to ensure reset is complete
@@ -150,7 +156,7 @@ void DroneTrainer::action_loop() {
                 brain_.save("drone_weights.txt"); 
             }
             // Crashed
-            else if (pos_z < 0.1f) { 
+            else if (pos_z < 0.15f) { 
                 done = true;
                 crashed = true; 
             }
@@ -250,10 +256,14 @@ void DroneTrainer::action_loop() {
 
 
 void DroneTrainer::reset_env() {
-    goal_reached_flag_ = false;
     geometry_msgs::msg::Twist stop;
-    pub_vel_->publish(stop);
+    stop.linear.x = 0.0; stop.linear.y = 0.0; stop.linear.z = 0.0;
+    stop.angular.z = 0.0;
     
+    for(int i=0; i<5; i++) {
+        pub_vel_->publish(stop);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     // Prepare the service request
     auto request = std::make_shared<ros_gz_interfaces::srv::SetEntityPose::Request>();
     request->entity.name = "escaper";
