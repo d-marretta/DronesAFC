@@ -36,6 +36,23 @@ DroneTrainer::DroneTrainer() : Node("drone_trainer"), gen_(0), pop_idx_(0) {
 
             has_odom = true;
         });
+    lidar_readings_.resize(16, MAX_LIDAR_DIST);
+    sub_scan_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
+    "/escaper/scan", rclcpp::SensorDataQoS(),
+    [this](const sensor_msgs::msg::LaserScan::SharedPtr msg) {
+        
+        for(size_t i=0; i<16 && i < msg->ranges.size(); i++) {
+            float r = msg->ranges[i];
+            
+            if (std::isinf(r) || std::isnan(r)) r = MAX_LIDAR_DIST;
+            
+            // Clamp to max range
+            if (r > MAX_LIDAR_DIST) r = MAX_LIDAR_DIST;
+            
+            // Store raw value for collision check
+            lidar_readings_[i] = r;
+        }
+    });
 
     std::random_device rd;
     rng_ = std::mt19937(rd());
@@ -140,6 +157,14 @@ void DroneTrainer::action_loop() {
             float dz = goal_z - pos_z;
             float dist = std::sqrt(dx_world*dx_world + dy_world*dy_world + dz*dz);
 
+            std::vector<float> inputs_mlp;
+
+            float min_obs_dist = MAX_LIDAR_DIST;
+
+            for(float range : lidar_readings_) {
+                inputs_mlp.push_back(std::clamp(range / MAX_LIDAR_DIST, 0.0f, 1.0f));
+                if(range < min_obs_dist) min_obs_dist = range;
+            }
             // Existential penalty
             current_episode_reward_ -= (PENALTY_W1 / T_MAX_STEPS);
 
@@ -156,7 +181,7 @@ void DroneTrainer::action_loop() {
                 brain_.save("drone_weights.txt"); 
             }
             // Crashed
-            else if (pos_z < 0.1f) { 
+            else if ((pos_z < 0.1f) || (min_obs_dist < 0.3f)) { 
                 done = true;
                 crashed = true; 
             }
@@ -202,16 +227,15 @@ void DroneTrainer::action_loop() {
             float dy_body = dx_world * sin_yaw + dy_world * cos_yaw;
             
             // Inference
-            std::vector<float> inputs = {
-                std::clamp(dx_body / MAX_DIST_RANGE, -1.0f, 1.0f), 
-                std::clamp(dy_body / MAX_DIST_RANGE, -1.0f, 1.0f), 
-                std::clamp(dz / MAX_DIST_RANGE, -1.0f, 1.0f),
-                std::clamp(vel_x / MAX_VEL_RANGE, -1.0f, 1.0f),
-                std::clamp(vel_y / MAX_VEL_RANGE, -1.0f, 1.0f),
-                std::clamp(vel_z / MAX_VEL_RANGE, -1.0f, 1.0f)
-            };
+            inputs_mlp.push_back(std::clamp(dx_body / MAX_DIST_RANGE, -1.0f, 1.0f));
+            inputs_mlp.push_back(std::clamp(dy_body / MAX_DIST_RANGE, -1.0f, 1.0f));
+            inputs_mlp.push_back(std::clamp(dz / MAX_DIST_RANGE, -1.0f, 1.0f));
+            inputs_mlp.push_back(std::clamp(vel_x / MAX_VEL_RANGE, -1.0f, 1.0f));
+            inputs_mlp.push_back(std::clamp(vel_y / MAX_VEL_RANGE, -1.0f, 1.0f));
+            inputs_mlp.push_back(std::clamp(vel_z / MAX_VEL_RANGE, -1.0f, 1.0f));
+            
 
-            auto outputs = brain_.forward(inputs, noise_population_[pop_idx_], SIGMA);
+            auto outputs = brain_.forward(inputs_mlp, noise_population_[pop_idx_], SIGMA);
 
             // Output mapping
             geometry_msgs::msg::Twist cmd;

@@ -6,6 +6,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include "drone_trainer/mlp.hpp"
 
 
@@ -21,6 +22,7 @@ private:
     rclcpp::Client<ros_gz_interfaces::srv::SetEntityPose>::SharedPtr client_reset_;    
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_enable_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr sub_scan_;
     rclcpp::TimerBase::SharedPtr timer_main;
 
     float pos_x=0, pos_y=0, pos_z=0;
@@ -28,10 +30,11 @@ private:
     float vel_x=0, vel_y=0, vel_z=0;
 
     bool has_odom = false;
-    float goal_x=10.0, goal_y=4.0, goal_z=3.0; 
+    float goal_x=20.0, goal_y=10.0, goal_z=7.0; 
 
     MLP brain_;
     std::vector<std::vector<float>> noise_population_;
+    std::vector<float> lidar_readings_;
     std::vector<float> rewards_;
     int gen_;
     int pop_idx_;

@@ -10,6 +10,7 @@ find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(ros_gz_interfaces REQUIRED)
@@ -26,16 +27,27 @@ ament_target_dependencies(run_all
   geometry_msgs 
   nav_msgs 
   std_msgs 
+  sensor_msgs
   tf2 
   tf2_geometry_msgs
   ros_gz_interfaces
 )
 
+add_executable(obstacle_mover 
+  src/obstacle.cpp
+)
+
+ament_target_dependencies(obstacle_mover
+  rclcpp
+  geometry_msgs
+)
+
 install(TARGETS
   run_all
+  obstacle_mover
   DESTINATION lib/${PROJECT_NAME})
 
-# Install headers (optional but good practice)
+# Install headers
 install(DIRECTORY include/
   DESTINATION include
 )
