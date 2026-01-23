@@ -6,6 +6,7 @@
 #include <random>
 #include <algorithm>
 #include <fstream>
+#include <iomanip>
 
 
 const int POP_SIZE = 128;         // Number of "drones" to test per generation
@@ -16,9 +17,9 @@ const int INPUT_SIZE = 22;        // Dx, Dy, Dz, Vel X, Vel Y, Vel Z
 const int HIDDEN_SIZE = 256;      // Neurons in hidden layer
 const int OUTPUT_SIZE = 4;       // Linear X, Linear Y, Linear Z, Angular Z
 
-const float START_X = 0.0f;
-const float START_Y = 0.0f;
-const float START_Z = 1.0f;
+const float ROOM_SIZE_X = 25.0f;
+const float ROOM_SIZE_Y = 25.0f;
+const float ROOM_SIZE_Z = 50.0f;
 
 const float MAX_LIN_VEL_X = 3.0f;  // Max horizontal speed (m/s)
 const float MAX_LIN_VEL_Y = 3.0f;
@@ -76,10 +77,13 @@ struct MLP {
     void save(const std::string& filename) {
         std::ofstream file(filename);
         if (file.is_open()) {
+            file << std::fixed << std::setprecision(std::numeric_limits<float>::max_digits10);
+            
             for (float w : weights) {
                 file << w << "\n";
             }
             file.close();
+            std::cout << "Weights saved to " << filename << std::endl;
         }
     }
     

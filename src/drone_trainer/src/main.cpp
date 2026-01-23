@@ -93,28 +93,25 @@ int main(int argc, char **argv) {
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    std::string obs_cmd = "ros2 run drone_trainer obstacle_mover --ros-args -p use_sim_time:=true"; 
-    pid_obs = start_process_bg(obs_cmd);
-    std::cout << "[C++] Obstacle controller started (PID " << pid_obs << ")" << std::endl;
+    // std::string obs_cmd = "ros2 run drone_trainer obstacle_mover --ros-args -p use_sim_time:=true"; 
+    // pid_obs = start_process_bg(obs_cmd);
+    // std::cout << "[C++] Obstacle controller started (PID " << pid_obs << ")" << std::endl;
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
     // spawn drone
     std::cout << "[C++] Spawning drone..." << std::endl;
     // Uses the ros_gz_sim create tool
-    std::string spawn_cmd = "ros2 run ros_gz_sim create -world quadcopter -file escaper.sdf -name escaper -x " + 
-                                std::to_string(START_X) + " -y " + 
-                                std::to_string(START_Y) + " -z " + 
-                                std::to_string(START_Z);
+    std::string spawn_cmd = "ros2 run ros_gz_sim create -world quadcopter -file escaper.sdf -name escaper -x 0 -y 0 -z 1";
     run_bash_blocking(spawn_cmd);
 
-    std::cout << "[C++] Spawning obstacles..." << std::endl;
+    // std::cout << "[C++] Spawning obstacles..." << std::endl;
     
-    std::string spawn_obs1 = "ros2 run ros_gz_sim create -world quadcopter -file obstacle1.sdf -name obstacle1 -x 14.0 -y 10.0 -z 7.0";
-    run_bash_blocking(spawn_obs1);
+    // std::string spawn_obs1 = "ros2 run ros_gz_sim create -world quadcopter -file obstacle1.sdf -name obstacle1 -x 14.0 -y 10.0 -z 7.0";
+    // run_bash_blocking(spawn_obs1);
 
-    std::string spawn_obs2 = "ros2 run ros_gz_sim create -world quadcopter -file obstacle2.sdf -name obstacle2 -x 17.0 -y 10.0 -z 7.0";
-    run_bash_blocking(spawn_obs2);
+    // std::string spawn_obs2 = "ros2 run ros_gz_sim create -world quadcopter -file obstacle2.sdf -name obstacle2 -x 17.0 -y 10.0 -z 7.0";
+    // run_bash_blocking(spawn_obs2);
 
     // Run trainer
     rclcpp::init(argc, argv);

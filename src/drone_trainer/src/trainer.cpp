@@ -57,6 +57,8 @@ DroneTrainer::DroneTrainer() : Node("drone_trainer"), gen_(0), pop_idx_(0) {
     std::random_device rd;
     rng_ = std::mt19937(rd());
     dist_ = std::normal_distribution<float>(0.0, 1.0);
+    dist_uniform_ = std::uniform_real_distribution<float>(-1.0, 1.0); 
+    dist_uniform_z_ = std::uniform_real_distribution<float>(0.0, 1.0);
 
     timer_main = rclcpp::create_timer(
         this->get_node_base_interface(),
@@ -112,9 +114,9 @@ void DroneTrainer::action_loop() {
             hover_cmd.angular.z = 0.0;
             pub_vel_->publish(hover_cmd);
             
-            float reset_dx = pos_x - START_X;
-            float reset_dy = pos_y - START_Y;
-            float reset_dz = pos_z - START_Z;
+            float reset_dx = pos_x - start_x;
+            float reset_dy = pos_y - start_y;
+            float reset_dz = pos_z - start_z;
             float dist_from_start = std::sqrt(reset_dx*reset_dx + reset_dy*reset_dy + reset_dz*reset_dz);
 
             // If we are further than 50cm from the spawn point, the reset hasn't finished yet
@@ -280,6 +282,7 @@ void DroneTrainer::action_loop() {
 
 
 void DroneTrainer::reset_env() {
+    
     geometry_msgs::msg::Twist stop;
     stop.linear.x = 0.0; stop.linear.y = 0.0; stop.linear.z = 0.0;
     stop.angular.z = 0.0;
@@ -288,13 +291,34 @@ void DroneTrainer::reset_env() {
         pub_vel_->publish(stop);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+
+    goal_x = dist_uniform_(rng_) * ROOM_SIZE_X; 
+    goal_y = dist_uniform_(rng_) * ROOM_SIZE_Y;
+    goal_z = 1.5f + (dist_uniform_z_(rng_) * (ROOM_SIZE_Z - 1.5f));
+
+    float dist;
+    do {
+        start_x = dist_uniform_(rng_) * ROOM_SIZE_X;
+        start_y = dist_uniform_(rng_) * ROOM_SIZE_Y;
+        start_z = 1.5f + (dist_uniform_z_(rng_) * (ROOM_SIZE_Z - 1.5f));
+
+        float dx = start_x - goal_x;
+        float dy = start_y - goal_y;
+        float dz = start_z - goal_z;
+        dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+
+    } while (dist < 3.0f); 
+
     // Prepare the service request
     auto request = std::make_shared<ros_gz_interfaces::srv::SetEntityPose::Request>();
     request->entity.name = "escaper";
-    request->pose.position.x = START_X;
-    request->pose.position.y = START_Y;
-    request->pose.position.z = START_Z;
+    request->pose.position.x = start_x;
+    request->pose.position.y = start_y;
+    request->pose.position.z = start_z;
     request->pose.orientation.w = 1.0;
+    request->pose.orientation.x = 0.0;
+    request->pose.orientation.y = 0.0;
+    request->pose.orientation.z = 0.0;
 
     // Call service asynchronously 
     if (client_reset_->service_is_ready()) {

@@ -30,6 +30,8 @@ private:
     float vel_x=0, vel_y=0, vel_z=0;
 
     bool has_odom = false;
+    float start_x=0, start_y=0, start_z=1.0;
+
     float goal_x=20.0, goal_y=10.0, goal_z=7.0; 
 
     MLP brain_;
@@ -52,6 +54,8 @@ private:
     
     std::mt19937 rng_;
     std::normal_distribution<float> dist_;
+    std::uniform_real_distribution<float> dist_uniform_; 
+    std::uniform_real_distribution<float> dist_uniform_z_;
 
     void action_loop();
     void reset_env();
