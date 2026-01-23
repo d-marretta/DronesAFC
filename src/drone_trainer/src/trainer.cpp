@@ -120,12 +120,13 @@ void DroneTrainer::action_loop() {
             float dist_from_start = std::sqrt(reset_dx*reset_dx + reset_dy*reset_dy + reset_dz*reset_dz);
 
             // If we are further than 50cm from the spawn point, the reset hasn't finished yet
-            if (dist_from_start > 0.5f) {
-                if ((now - reset_trigger_time_).seconds() > 1.0) {
+            if (dist_from_start > 1.0f) {
+                if ((now - reset_trigger_time_).seconds() > 2.0) {
                     RCLCPP_WARN(this->get_logger(), 
                         "Stuck at %.2fm (Threshold 0.5m). Forcing retry...", dist_from_start);
                     
-                    reset_env(); 
+                    reset_env();
+                    reset_trigger_time_ = now;
                     return; 
                 }
                         
@@ -205,11 +206,12 @@ void DroneTrainer::action_loop() {
                 // Logging and state Transition
                 rewards_.push_back(current_episode_reward_);
                 RCLCPP_INFO(this->get_logger(), 
-                    "Member %d Done. Reward: %.2f (Dist: %.2f -> %.2f) | End Pos: [%.2f, %.2f, %.2f] | Goal: [%.2f, %.2f, %.2f]", 
+                    "Member %d Done. Reward: %.2f (Dist: %.2f -> %.2f) | Start: [%.2f, %.2f, %.2f] | End: [%.2f, %.2f, %.2f] | Goal: [%.2f, %.2f, %.2f]", 
                     pop_idx_+1, 
                     current_episode_reward_, 
                     initial_dist_, 
                     dist,
+                    start_x, start_y, start_z, 
                     pos_x, pos_y, pos_z,    
                     goal_x, goal_y, goal_z 
                 );
