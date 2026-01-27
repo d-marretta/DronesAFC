@@ -10,9 +10,9 @@
 
 
 const int POP_SIZE = 128;         // Number of "drones" to test per generation
-const float SIGMA = 0.15f;        // Noise standard deviation
-const float ALPHA = 0.01f;       // Learning rate
-const float EPISODE_TIME = 12.0f; // Seconds per flight
+const float SIGMA = 0.02f;        // Noise standard deviation
+const float ALPHA = 0.001f;       // Learning rate
+const float EPISODE_TIME = 18.0f; // Seconds per flight
 const int INPUT_SIZE = 22;        // Dx, Dy, Dz, Vel X, Vel Y, Vel Z
 const int HIDDEN_SIZE = 256;      // Neurons in hidden layer
 const int OUTPUT_SIZE = 4;       // Linear X, Linear Y, Linear Z, Angular Z
@@ -21,12 +21,12 @@ const float ROOM_SIZE_X = 7.5f;
 const float ROOM_SIZE_Y = 7.5f;
 const float ROOM_SIZE_Z = 10.0f;
 
-const float MAX_LIN_VEL_X = 3.0f;  // Max horizontal speed (m/s)
-const float MAX_LIN_VEL_Y = 3.0f;
+const float MAX_LIN_VEL_X = 2.0f;  // Max horizontal speed (m/s)
+const float MAX_LIN_VEL_Y = 2.0f;
 const float MAX_LIN_VEL_Z  = 1.0f;  // Max vertical speed (m/s)
 const float MAX_ANG_VEL_Z  = 1.5f;  // Max rotational speed (rad/s)
-const float MAX_DIST_RANGE = 30.0f; // Inputs beyond are clamped to 1.0
-const float MAX_VEL_RANGE  = 3.0f;  // Inputs beyond are clamped to 1.0
+const float MAX_DIST_RANGE = 15.0f; // Inputs beyond are clamped to 1.0
+const float MAX_VEL_RANGE  = 2.0f;  // Inputs beyond are clamped to 1.0
 const float MAX_LIDAR_DIST = 5.0f;
 
 inline float tanh_activation(float x) { return std::tanh(x); }
@@ -85,6 +85,30 @@ struct MLP {
             file.close();
             std::cout << "Weights saved to " << filename << std::endl;
         }
+    }
+    void load(const std::string& filename) {
+        std::ifstream file(filename);
+        
+        if (!file.is_open()) {
+            std::cerr << "[Error] Could not open weight file: " << filename << std::endl;
+            return;
+        }
+
+        std::vector<float> loaded_weights;
+        float w;
+        while (file >> w) {
+            loaded_weights.push_back(w);
+        }
+        file.close();
+
+        if (loaded_weights.size() != weights.size()) {
+            std::cerr << "[Error] Weight count mismatch! File has " << loaded_weights.size() 
+                    << " weights, but model expects " << weights.size() << "." << std::endl;
+            return;
+        }
+
+        weights = loaded_weights;
+        std::cout << "[Brain] Successfully loaded " << weights.size() << " weights from " << filename << std::endl;
     }
     
     int get_weight_count() { return weights.size(); }

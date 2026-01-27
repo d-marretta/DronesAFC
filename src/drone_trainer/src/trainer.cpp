@@ -54,6 +54,11 @@ DroneTrainer::DroneTrainer() : Node("drone_trainer"), gen_(0), pop_idx_(0) {
         }
     });
 
+    if (is_inference_mode_ || load_weights_) {
+        brain_.load("drone_weights.txt"); 
+        RCLCPP_INFO(this->get_logger(), "Weights loaded.");
+    }
+
     std::random_device rd;
     rng_ = std::mt19937(rd());
     dist_ = std::normal_distribution<float>(0.0, 1.0);
@@ -68,7 +73,7 @@ DroneTrainer::DroneTrainer() : Node("drone_trainer"), gen_(0), pop_idx_(0) {
         std::bind(&DroneTrainer::action_loop, this)
     );
     state_ = STATE_INIT;
-    RCLCPP_INFO(this->get_logger(), "Trainer Node Initialized.");
+    RCLCPP_INFO(this->get_logger(), "Trainer node initialized.");
 }
 
 void DroneTrainer::action_loop() {
@@ -84,15 +89,21 @@ void DroneTrainer::action_loop() {
             noise_population_.clear();
             rewards_.clear();
             // Generate noise for the entire population
-            for(int i=0; i<POP_SIZE / 2; i++) {
-                std::vector<float> noise(brain_.get_weight_count());
-                for(float &n : noise) n = dist_(rng_);
-                noise_population_.push_back(noise);
-                
-                // Use antithetic sampling
-                std::vector<float> anti_noise = noise;
-                for(float &n : anti_noise) n = -n;
-                noise_population_.push_back(anti_noise);
+            if (is_inference_mode_) {
+                // Push one empty noise vector so [pop_idx_] is valid
+                std::vector<float> dummy_noise(brain_.get_weight_count(), 0.0f);
+                noise_population_.push_back(dummy_noise);
+            } 
+            else {
+                for(int i=0; i<POP_SIZE / 2; i++) {
+                    std::vector<float> noise(brain_.get_weight_count());
+                    for(float &n : noise) n = dist_(rng_);
+                    noise_population_.push_back(noise);
+                    
+                    std::vector<float> anti_noise = noise;
+                    for(float &n : anti_noise) n = -n;
+                    noise_population_.push_back(anti_noise);
+                }
             }
             pop_idx_ = 0;
             RCLCPP_INFO(this->get_logger(), "=== GEN %d STARTED ===", gen_);
@@ -181,7 +192,6 @@ void DroneTrainer::action_loop() {
             else if (dist < 0.5f) {
                 done = true;
                 RCLCPP_INFO(this->get_logger(), "GOAL REACHED!");
-                brain_.save("drone_weights.txt"); 
             }
             // Crashed
             else if ((pos_z < 0.1f) || (min_obs_dist < 0.3f)) { 
@@ -190,6 +200,20 @@ void DroneTrainer::action_loop() {
             }
 
             if (done) {
+                if (is_inference_mode_) {
+                    if (dist < 0.5f) RCLCPP_INFO(this->get_logger(), "TEST SUCCESS: Goal reached!");
+                    RCLCPP_INFO(this->get_logger(), 
+                    "Dist: %.2f -> %.2f | Start: [%.2f, %.2f, %.2f] | End: [%.2f, %.2f, %.2f] | Goal: [%.2f, %.2f, %.2f]", 
+                    initial_dist_, 
+                    dist,
+                    start_x, start_y, start_z, 
+                    pos_x, pos_y, pos_z,    
+                    goal_x, goal_y, goal_z 
+                );
+                    state_ = STATE_RESET;
+                    return;
+                }
+
                 float terminal_reward = 0.0f;
 
                 if (crashed) {
@@ -238,8 +262,13 @@ void DroneTrainer::action_loop() {
             inputs_mlp.push_back(std::clamp(vel_y / MAX_VEL_RANGE, -1.0f, 1.0f));
             inputs_mlp.push_back(std::clamp(vel_z / MAX_VEL_RANGE, -1.0f, 1.0f));
             
-
-            auto outputs = brain_.forward(inputs_mlp, noise_population_[pop_idx_], SIGMA);
+            // if (pop_idx_ == 0 && state_ == STATE_ROLLOUT) { // Only print for first member to avoid spam
+            //     std::cout << "Lidar: [";
+            //     for(auto r : lidar_readings_) std::cout << r << " ";
+            //     std::cout << "]" << std::endl;
+            // }
+            float noise_level = is_inference_mode_ ? 0.0f : SIGMA;
+            auto outputs = brain_.forward(inputs_mlp, noise_population_[pop_idx_], noise_level);
 
             // Output mapping
             geometry_msgs::msg::Twist cmd;
@@ -253,6 +282,11 @@ void DroneTrainer::action_loop() {
             break;
         }
         case STATE_UPDATE: {
+            if (is_inference_mode_) {
+                state_ = STATE_RESET;
+                return;
+            }
+
             float mean = 0.0f, std_dev = 0.0f;
             for(float r : rewards_) mean += r;
             mean /= POP_SIZE;
@@ -275,6 +309,7 @@ void DroneTrainer::action_loop() {
             }
 
             RCLCPP_INFO(this->get_logger(), "GEN %d COMPLETE. Avg Reward: %.2f", gen_, mean);
+            brain_.save("drone_weights.txt"); 
             gen_++;
             state_ = STATE_INIT;
             break;

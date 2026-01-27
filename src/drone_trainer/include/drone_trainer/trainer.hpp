@@ -25,6 +25,9 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr sub_scan_;
     rclcpp::TimerBase::SharedPtr timer_main;
 
+    bool is_inference_mode_ = false;
+    bool load_weights_ = true;
+    
     float pos_x=0, pos_y=0, pos_z=0;
     float current_yaw = 0.0;
     float vel_x=0, vel_y=0, vel_z=0;
